@@ -8,12 +8,39 @@ import time
 import math
 import re
 
+#//lookup dictionary for svg element transform tag parsing
 rx_dict = {
     'translate': re.compile(r'translate\((?P<translate>[\d.\s]+)\)'),
     'scale': re.compile(r'scale\((?P<scale>[\d.\s]+)\)'),
     'rotate': re.compile(r'rotate\((?P<rotate>[\d.\s]+)\)'),
     'matrix': re.compile(r'matrix\((?P<matrix>[-\d.\s]+)\)')
 }
+
+#//human-readable key-event to keymap interpreter
+keymap = {}
+for key, value in vars(Qt).items():
+    if isinstance(value, Qt.Key):
+        keymap[value] = key.partition('_')[2]
+
+keymap_modifiers = {
+    Qt.ControlModifier: keymap[Qt.Key_Control],
+    Qt.AltModifier: keymap[Qt.Key_Alt],
+    Qt.ShiftModifier: keymap[Qt.Key_Shift],
+    Qt.MetaModifier: keymap[Qt.Key_Meta],
+    Qt.GroupSwitchModifier: keymap[Qt.Key_AltGr],
+    Qt.KeypadModifier: keymap[Qt.Key_NumLock],
+}
+
+
+def key_event_to_string(k_evt):
+    sequence = []
+    for modifier, text in keymap_modifiers.items():
+        if k_evt.modifiers() & modifier:
+            sequence.append(text)
+    key = keymap.get(k_evt.key(), k_evt.text())
+    if key not in sequence:
+        sequence.append(key)
+    return sequence
 
 
 class ItemAnim(QPointF):
@@ -46,7 +73,7 @@ class ItemAnim(QPointF):
         else:
             self.tct += 1
 
-        arp = self.easeInOutSine(self.tct, 0, 2, self.rate*2)
+        arp = self.easeInOutSine(self.tct, 0, 2, self.rate * 2)
         self.is_animating = d > 0.005
 
         if self.is_animating:
@@ -93,7 +120,7 @@ class SvgLayer(QGraphicsSvgItem):
     def update_pos(self):
         self.center_x = float(self.animator.p1.x() - self.origin.x())
         self.center_y = float(self.animator.p1.y() - self.origin.y())
-        self.update_view(self.size)
+        self.update_view()
 
     def load_item(self):
         print('loaded')
@@ -106,8 +133,8 @@ class SvgLayer(QGraphicsSvgItem):
         self.animator.p2 = self.origin
         self.scale_s = 0.5
         self.setScale(self.scale_s)
-        self.center_x = float(self.size.width() / 2.0)*self.scale_s  #.x()
-        self.center_y = float(self.size.height() / 2.0)*self.scale_s  #.y()
+        self.center_x = float(self.size.width() / 2.0) * self.scale_s  #.x()
+        self.center_y = float(self.size.height() / 2.0) * self.scale_s  #.y()
         self.update_view()
 
     def update_view(self):
@@ -144,20 +171,6 @@ class SvgLayer(QGraphicsSvgItem):
 
 
 class SvgLand(QGraphicsView):  #QSvgWidget):
-    location_changed = pyqtSignal(QPointF)
-    keymap = {}
-    for key, value in vars(Qt).items():
-        if isinstance(value, Qt.Key):
-            keymap[value] = key.partition('_')[2]
-
-    keymap_modifiers = {
-        Qt.ControlModifier: keymap[Qt.Key_Control],
-        Qt.AltModifier: keymap[Qt.Key_Alt],
-        Qt.ShiftModifier: keymap[Qt.Key_Shift],
-        Qt.MetaModifier: keymap[Qt.Key_Meta],
-        Qt.GroupSwitchModifier: keymap[Qt.Key_AltGr],
-        Qt.KeypadModifier: keymap[Qt.Key_NumLock],
-    }
 
     def __init__(self, parent=None):
         super(SvgLand, self).__init__(parent)
@@ -220,7 +233,6 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
 
     #make an SvgLayer:QGraphicsSvgItem
     def make_svg_item(self, item_id):
-        #requires self.renderer
         h = SvgLayer(self)
         h.setSharedRenderer(self.renderer)
         h.setElementId(item_id)
@@ -229,13 +241,14 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         h.setZValue(1)
         return h
 
-    #apply_transform takes extant_svg_xml and returns a QTransform()
+    # apply_transform takes extant svg_xml and returns a QTransform()
+    # noinspection PyMethodMayBeStatic
     def node_transform(self, xml_node):
         mtrans = xml_node.get('transform')
         tranox = {}
 
         if mtrans is not None:
-            print(xml_node.get('id'), "node_transform", xml_node.attrib)
+            # print(xml_node.get('id'), "node_transform", xml_node.attrib)
             for key, rx in rx_dict.items():
                 match = rx.search(mtrans)
                 if match:
@@ -250,23 +263,23 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
             translate = [0, 0]
 
         if 'rotate' in tranox:
-            print('rotated', xml_node.attrib)
+            #print('rotated', xml_node.attrib)
+            pass
 
         if 'matrix' in tranox:
             matrix = tranox['matrix']
         else:
             matrix = [1, 0, 0, -1, translate[0], translate[1]]
 
-        print(matrix)
         attributes_copy = ['width', 'height', 'x', 'y']  #, 'x', 'y']
 
-        apos = {'matrix': matrix}  #[1, 0, 0, -1, matrix[0], matrix[1]]}
+        apos = {'matrix': matrix}
 
         for n in attributes_copy:
             apos[n] = float(xml_node.get(n))
 
-        x_offset = (apos["x"] * matrix[0])  #0  #(apos["width"]/ 2)  #*matrix[0]   #apos["x"] * float(matrix[0]) + self.dims_offset.width()
-        y_offset = (apos["y"] * matrix[0])  # 0 #apos["y"] * abs(float(matrix[3])) + self.dims_offset.height()
+        x_offset = (apos["x"] * matrix[0])
+        y_offset = (apos["y"] * matrix[0])
 
         m11 = float(matrix[0])  #m11() // Horizontal scaling
         m12 = transform.m12()  ##;    // Vertical shearing
@@ -281,6 +294,7 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         transform.setMatrix(m11, m12, m13, m21, m22, m23, m31, m32, m33)
         return transform
 
+    # meats
     def load(self, path):
         svg_source = QFile(path)
         if not svg_source.exists():
@@ -289,9 +303,6 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         svg_source_file = svg_source.fileName()
         svg_filter_file = svg_source.fileName().split('.')[0] + '-filtered.svg'
         scene = self.scene()
-        #// MODIFY STRUCTURE OF SOURCE SVG
-        # tree = ElementTree.parse(svg_source_file)
-        # root = tree.getroot()
 
         tree = etree.parse(svg_source_file)
         root = tree.getroot()
@@ -299,14 +310,12 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         symbols = {}
         namespace = "{http://www.w3.org/2000/svg}"
         svg_item_copied_attributes = ['x', 'y', 'width', 'height', 'transform']
-        #//<use width="20" height="20" transform="translate(7873.71765 1139.40743)" xlink:href="#num_12"/>
         symbols_layer = etree.SubElement(root, '{0}g'.format(namespace))
         symbols_layer.set('id', 'symbols_layer')
 
         for symbol in root.findall('.//{0}symbol'.format(namespace)):
             symbols[symbol.get("id")] = symbol
 
-        #//TODO: alert this
         all_uses = root.findall('.//*{0}use'.format(namespace))
 
         for use in all_uses:
@@ -315,48 +324,40 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
             symbol = root.findall(".//*[@id='%s']" % str(uid[1:]))[0]
             symbol_fax = etree.SubElement(par, 'g')
             symbol_fax.set('id', str(uid[1:]))
-
             if symbol.tag == '{0}symbol'.format(namespace):
                 for att in svg_item_copied_attributes:
                     symbol_fax.set(att, use.get(att))
                 for g in symbol:
                     symbol_fax.append(g)
-
                 root.remove(symbol)
                 symbols_layer.append(symbol_fax)
-
             par.remove(use)
 
         tree.write(svg_filter_file)
         print('supersede')
-
         #// APPLY SOURCE SVG to SvgLand(QGraphicsView)
-        self.renderer = QSvgRenderer(svg_filter_file)  #svg_filter_file)
-
+        self.renderer = QSvgRenderer(svg_filter_file)
         print('renderer set')
 
-        #self.anchor_layer = self.make_svg_item('anchor')
         self.anchor_layer = SvgLayer(self)
         self.anchor_layer.setSharedRenderer(self.renderer)
-        self.anchor_layer.setCacheMode(QGraphicsItem.NoCache)  #$NoCache)
+        self.anchor_layer.setCacheMode(QGraphicsItem.NoCache)
         self.anchor_layer.setFlags(QGraphicsItem.ItemClipsChildrenToShape)
 
         self.dims_limit = QSizeF(self.renderer.defaultSize())
         self.dims_page = QSizeF(self.anchor_layer.boundingRect().size())
-        self.dims_offset = (self.dims_page - self.dims_limit) / 2.0
+        #self.dims_offset = (self.dims_page - self.dims_limit) / 2.0
 
         self.dims_viewport_raw = self.viewport().rect()  #//d
         self.dims_viewport = self.mapToScene(self.dims_viewport_raw).boundingRect()  #//r
         scene.setSceneRect(QRectF(self.dims_viewport_raw))
 
         for layer in root.findall('{0}g'.format(namespace)):
-            print('main', layer.get("id"))
-
+            #print('main', layer.get("id"))
             if layer.get('id') == 'symbols_layer':
                 symbols_converted = layer.findall('g')
-
                 for symbol in symbols_converted:
-                    print(symbol.get('id'))
+                    #print(symbol.get('id'))
                     symbol_transform = self.node_transform(symbol)
                     created_symbol_item = self.make_svg_item(symbol.get('id'))
                     created_symbol_item.setTransform(symbol_transform)
@@ -366,24 +367,14 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
 
                     if symbol.get('id') == 'plush':
                         self.plush = created_symbol_item
-            else:
-                pass
-                # created_layer_item = self.make_svg_item(layer.get("id"))
-                # if layer.get('class') == '.hidden':
-                #     created_layer_item.hide()
-                # created_layer_item.usage_type = 'layer-area'
-                # created_layer_item.setParentItem(self.anchor_layer)
-                # scene.addItem(created_layer_item) #self.anchor_layer)
 
         scene.addItem(self.anchor_layer)
-
         self.anchor_layer.load_item()
-        #self.anchor_layer.center(self.dims_viewport)
-
+        self.anchor_layer.center(self.dims_viewport)
         self.plush.load_item()
+        self.plush.animator.rate = 60
 
-        self.plush.animator.rate = 60  #()
-
+    #forced displacement
     def svg_move_to(self, loc: QPointF, relative=False):
         #//map to self coords
         if relative:
@@ -395,6 +386,7 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         self.anchor_layer.center_y += delta.y()
         self.anchor_layer.update_view()
 
+    # move to waypoint position (index)
     def svg_move_to_index(self, index_item):
         self.plush.animator.tct = 0
         self.plush.animator.p2 = index_item.get_center_pos()
@@ -443,11 +435,8 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
                 self.anchor_layer.center_y = self.start_center_y - dy
                 self.anchor_layer.update_view()
 
-                ct = QPointF(self.anchor_layer.center_x, self.anchor_layer.center_y)
                 self.anchor_layer.animator.setX(self.anchor_layer.center_x)
                 self.anchor_layer.animator.setY(self.anchor_layer.center_y)
-                #print(ct)
-
                 flag = 'translating'
 
         interact = self.itemAt(evt.pos())
@@ -462,19 +451,9 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
             self.mouseMoveEvent(evt)
             self.anchor_translating = None
 
-    def key_event_to_string(self, event):
-        sequence = []
-        for modifier, text in self.keymap_modifiers.items():
-            if event.modifiers() & modifier:
-                sequence.append(text)
-        key = self.keymap.get(event.key(), event.text())
-        if key not in sequence:
-            sequence.append(key)
-        return sequence
-
-    def event(self, event):
-        if event.type() == QEvent.KeyPress:
-            keys = self.key_event_to_string(event)
+    def event(self, evt):
+        if evt.type() == QEvent.KeyPress:
+            keys = key_event_to_string(evt)
             self.parent.set_status('+'.join(keys))
 
             if 'Space' in keys:
@@ -492,10 +471,11 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
 
             if 'D' in keys:
                 self.set_item_index(dir=1)
-            return True
 
-        #super(MainWindow, self).event(event)
-        return QGraphicsView.event(self, event)
+            #return True
+
+        #super(SvgLand, self).event(evt)
+        return QGraphicsView.event(self, evt)
 
     def resizeEvent(self, evt):
         self.dims_viewport_raw = self.viewport().rect()
@@ -521,10 +501,11 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         #self.parent.set_status()
 
     def paintEvent(self, evt):
-        self.paint_time = time.time()
-        super(SvgLand, self).paintEvent(evt)
+
         self.util_paint_timer()
         self.paint_time_delta = time.time() - self.paint_time  #this is seconds
+        self.paint_time = time.time()
+        super(SvgLand, self).paintEvent(evt)
 
 
 class MainWindow(QMainWindow):
@@ -572,7 +553,7 @@ class MainWindow(QMainWindow):
         self.show()
 
     def set_status(self, s_str):
-        self.statusbar.showMessage(self.viewer.paint_fps+self.viewer.rel_mouse+s_str)
+        self.statusbar.showMessage(self.viewer.paint_fps + self.viewer.rel_mouse + s_str)
 
     def show_location(self, pt):
         self.statusbar.showMessage("%f %f" % (pt.x(), pt.y()))
