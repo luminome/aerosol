@@ -20,16 +20,16 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtSvg import *
 from lxml import etree
-import time
-import math
-import re
+from time import time
+from math import cos, pi, sqrt
+from re import compile
 
 # lookup dictionary for svg element transform tag parsing
 rx_dict = {
-    'translate': re.compile(r'translate\((?P<translate>[\d.\s]+)\)'),
-    'scale': re.compile(r'scale\((?P<scale>[\d.\s]+)\)'),
-    'rotate': re.compile(r'rotate\((?P<rotate>[\d.\s]+)\)'),
-    'matrix': re.compile(r'matrix\((?P<matrix>[-\d.\s]+)\)')
+    'translate': compile(r'translate\((?P<translate>[\d.\s]+)\)'),
+    'scale': compile(r'scale\((?P<scale>[\d.\s]+)\)'),
+    'rotate': compile(r'rotate\((?P<rotate>[\d.\s]+)\)'),
+    'matrix': compile(r'matrix\((?P<matrix>[-\d.\s]+)\)')
 }
 
 # human-readable key-event to keymap interpreter
@@ -50,16 +50,15 @@ keymap_modifiers = {
 
 # simple easing function for custom non-qt animator class ItemAnim
 def ease_in_out_sine(t, b, c, d):
-    return -c / 2 * (math.cos(math.pi * t / d) - 1) + b
+    return -c / 2 * (cos(pi * t / d) - 1) + b
 
 # t is the current time (or position) of the tween.
 # b is the beginning value of the property.
 # c is the change between the beginning and destination value of the property.
 # d is the total time of the tween.
 
+
 # Easing Equations in Python https://gist.github.com/th0ma5w/9883420
-
-
 def key_event_to_string(k_evt):
     sequence = []
     for modifier, text in keymap_modifiers.items():
@@ -72,9 +71,9 @@ def key_event_to_string(k_evt):
 
 
 # custom non-qt animator class
-class ItemAnim(QPointF):
+class SvgLayerAnimator(QPointF):
     def __init__(self, parent=None):
-        super(ItemAnim, self).__init__()
+        super(SvgLayerAnimator, self).__init__()
         self.item = parent
         self.p1 = QPointF()
         self.p2 = QPointF()
@@ -94,7 +93,7 @@ class ItemAnim(QPointF):
     def idle(self):
         a = float((self.p1.x() - self.p2.x()))
         b = float((self.p1.y() - self.p2.y()))
-        d = math.sqrt(pow(a, 2) + pow(b, 2))
+        d = sqrt(pow(a, 2) + pow(b, 2))
         self.tct += 1
 
         arp = ease_in_out_sine(self.tct, 0, 2, self.rate * 2)
@@ -111,30 +110,26 @@ class ItemAnim(QPointF):
             self.tct = 0
 
 
+# broadly defined SVG container (recipient of id-based query towards imported svg)
 class SvgLayer(QGraphicsSvgItem):
     def __init__(self, parent=None):
         super(SvgLayer, self).__init__()
-        self.ds = None
         self.scale_s = 0.0
         self.center_x = 0
         self.center_y = 0
-        self.defViewBox = None
         self.parent = parent
         self.size = None
         self.width = None
         self.height = None
         self.usage_type = None
-        self.size = self.boundingRect()
-        self.width = self.size.width()
-        self.height = self.size.height()
         self.transform = QTransform()
-        self.animator = ItemAnim(self)
+        self.animator = SvgLayerAnimator(self)
         self.origin = None
         self.is_anchor = False
 
     @property
     def test_prop(self):
-        return ['alrighty', self.usage_type]
+        return ['alright, then.', self.usage_type]
 
     def get_center_pos(self):
         d = self.boundingRect()
@@ -167,21 +162,6 @@ class SvgLayer(QGraphicsSvgItem):
         self.center_y = float(self.size.height() / 2.0) * self.scale()
         self.update_view()
 
-    # generally responsible endpoint for all transforming
-    def update_view(self):
-        w = self.scale() * self.width
-        h = self.scale() * self.height
-        c = QPointF(self.center_x - w / 2.0, self.center_y - h / 2.0)
-
-        if self.is_anchor:
-            #//UNDER CONSTRUCTION FOR ZOOM LIMITS
-            window_rect = QRectF(self.parent.dims_viewport_raw)
-            # is any side of the rect < any side of window_rect? but which?
-            # bitwise and?
-            pass
-
-        self.setPos(c)
-
     def center(self, size):
         self.scale_s = float(size.height()) / self.height
         self.setScale(self.scale_s)
@@ -201,15 +181,27 @@ class SvgLayer(QGraphicsSvgItem):
 
         self.center_x = center_x - dx * self.scale_s
         self.center_y = center_y - dy * self.scale_s
-
         self.animator.setX(self.center_x)
         self.animator.setY(self.center_y)
-
         self.update_view()
 
+    # generally responsible endpoint for all transforming
+    #// LOEV HTIS
+    def update_view(self):
+        w = self.scale() * self.width
+        h = self.scale() * self.height
+        c = QPointF(self.center_x - w / 2.0, self.center_y - h / 2.0)
+        if self.is_anchor:
+            chk = QRectF(self.parent.dims_viewport_raw)
+            if chk & self.sceneBoundingRect() != chk:
+                #at least a first pass on state.
+                # then there are the more granular interlopers as l,t,r,b rect
+                print('do something here..')
 
-class SvgLand(QGraphicsView):  #QSvgWidget):
+        self.setPos(c)
 
+
+class SvgLand(QGraphicsView):
     def __init__(self, parent=None):
         super(SvgLand, self).__init__(parent)
         self.renderer = None
@@ -217,7 +209,7 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         self.massive = None
         self.anchor_layer = QGraphicsSvgItem()
         self.anchor_translating = None
-        self.dims_offset = QSizeF()
+        #self.dims_offset = QSizeF()
         self.dims_viewport = QRectF()
         self.dims_viewport_raw = QRectF()
         self.dims_limit = None
@@ -231,12 +223,11 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         self.fps_average = (0.0,)
         self.paint_time = 0.0
         self.paint_time_delta = 1
-        self.showShort = None
         self.new_loc = None
         self.plush = None
         self.index = 0
-        self.paint_fps = None
-        self.rel_mouse = None
+        self.string_paint_fps = None
+        self.string_rel_mouse = None
 
         tile_pixmap = QPixmap(100, 100)
         tile_pixmap.fill(Qt.white)
@@ -477,9 +468,9 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
         interact = self.itemAt(evt.pos())
         if interact:
             op = QPointF(self.anchor_layer.mapFromParent(evt.pos()))
-            self.rel_mouse = ('X %i Y %i %s' % (op.x(), op.y(), flag))
+            self.string_rel_mouse = ('X %i Y %i %s' % (op.x(), op.y(), flag))
         else:
-            self.rel_mouse = ('VOID %s' % flag)
+            self.string_rel_mouse = ('VOID %s' % flag)
 
     def mouseReleaseEvent(self, evt):
         if evt.button() == Qt.LeftButton:
@@ -530,15 +521,15 @@ class SvgLand(QGraphicsView):  #QSvgWidget):
             n = n[1:]
 
         self.fps_average = n
-        seconds = int(time.time() % 60)
+        seconds = int(time() % 60)
 
-        self.paint_fps = '%02i | %d paints/sec' % (seconds, a)
+        self.string_paint_fps = '%02i | %d paints/sec' % (seconds, a)
         #self.parent.set_status()
 
     def paintEvent(self, evt):
         self.util_paint_timer()
-        self.paint_time_delta = time.time() - self.paint_time  #this is seconds
-        self.paint_time = time.time()
+        self.paint_time_delta = time() - self.paint_time  #this is seconds
+        self.paint_time = time()
         super(SvgLand, self).paintEvent(evt)
 
 
@@ -587,7 +578,7 @@ class MainWindow(QMainWindow):
         self.show()
 
     def set_status(self, s_str):
-        self.statusbar.showMessage(str(self.viewer.paint_fps) + '\t' + str(self.viewer.rel_mouse) + '\t' + s_str)
+        self.statusbar.showMessage(str(self.viewer.string_paint_fps) + '\t' + str(self.viewer.string_rel_mouse) + '\t' + s_str)
 
     def show_location(self, pt):
         self.statusbar.showMessage("%f %f" % (pt.x(), pt.y()))
@@ -605,9 +596,9 @@ class MainWindow(QMainWindow):
 
         try:
             self.tick_counter += 1
-            tick = int(round(time.time() * 1000) / 100)
+            tick = int(round(time() * 1000) / 100)
             self.frame_counter += 1
-            seconds = int(time.time() % 60)
+            seconds = int(time() % 60)
 
             if tick != self.tick_time_counter:
                 self.viewer.util_paint_timer()
