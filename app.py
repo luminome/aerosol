@@ -21,7 +21,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtSvg import *
 from lxml import etree
 from time import time
-from math import cos, pi, sqrt
+from math import cos, sin, pi, sqrt
 from re import compile
 
 # lookup dictionary for svg element transform tag parsing
@@ -51,11 +51,15 @@ keymap_modifiers = {
 # simple easing function for custom non-qt animator class ItemAnim
 def ease_in_out_sine(t, b, c, d):
     return -c / 2 * (cos(pi * t / d) - 1) + b
+    # t is the current time (or position) of the tween.
+    # b is the beginning value of the property.
+    # c is the change between the beginning and destination value of the property.
+    # d is the total time of the tween.
 
-# t is the current time (or position) of the tween.
-# b is the beginning value of the property.
-# c is the change between the beginning and destination value of the property.
-# d is the total time of the tween.
+
+def d_ease(t, d):
+    #print(t, sin(pi * t / d))
+    return sin(pi * t / d)
 
 
 # Easing Equations in Python https://gist.github.com/th0ma5w/9883420
@@ -80,6 +84,7 @@ class SvgLayerAnimator(QPointF):
         self.rate = 120.0
         self.is_animating = False
         self.tct = 0
+        self.scale_shift = 1
 
     def reset_position(self, reset_pos: QPointF):
         self.p1 = reset_pos
@@ -94,18 +99,25 @@ class SvgLayerAnimator(QPointF):
         a = float((self.p1.x() - self.p2.x()))
         b = float((self.p1.y() - self.p2.y()))
         d = sqrt(pow(a, 2) + pow(b, 2))
-        self.tct += 1
 
-        arp = ease_in_out_sine(self.tct, 0, 2, self.rate * 2)
-        self.is_animating = d > 0.005
+        arp = ease_in_out_sine(self.tct, 0, 1, self.rate)
+        self.is_animating = d > 0.0005
 
         if self.is_animating:
-            x = float(self.x()) - float(a * arp)
+
+            if not self.item.is_anchor:
+                aps = sin(pi * ((self.tct*2) / self.rate))
+                print(self.tct, self.rate, aps)
+                self.item.setScale(1+aps)
+
+            x = float(self.x()) - float(a * arp)  #pure luck here.
             y = float(self.y()) - float(b * arp)
             self.setX(x)
             self.setY(y)
             self.p1 = QPointF(x, y)
+
             self.item.update_pos()
+            self.tct += 0.5
         else:
             self.tct = 0
 
@@ -174,29 +186,46 @@ class SvgLayer(QGraphicsSvgItem):
         z = self.mapFromScene(evt.pos())
         dx = z.x() - self.width / 2
         dy = z.y() - self.height / 2
-        center_x = self.center_x + dx * self.scale_s
-        center_y = self.center_y + dy * self.scale_s
+        c_x = self.center_x + dx * self.scale_s
+        c_y = self.center_y + dy * self.scale_s
         self.scale_s = self.scale_s * 1.0025 ** (-mouse_angle)
+        s = self.parent.dims_viewport_raw.height() / self.height
+        if self.scale_s < s:
+            self.scale_s = s
+
         self.setScale(self.scale_s)
 
-        self.center_x = center_x - dx * self.scale_s
-        self.center_y = center_y - dy * self.scale_s
+        self.center_x = c_x - dx * self.scale_s
+        self.center_y = c_y - dy * self.scale_s
         self.animator.setX(self.center_x)
         self.animator.setY(self.center_y)
         self.update_view()
 
     # generally responsible endpoint for all transforming
-    #// LOEV HTIS
     def update_view(self):
         w = self.scale() * self.width
         h = self.scale() * self.height
         c = QPointF(self.center_x - w / 2.0, self.center_y - h / 2.0)
+
+        #// can optimize?
         if self.is_anchor:
             chk = QRectF(self.parent.dims_viewport_raw)
-            if chk & self.sceneBoundingRect() != chk:
-                #at least a first pass on state.
-                # then there are the more granular interlopers as l,t,r,b rect
-                print('do something here..')
+
+            if c.y() > 0:
+                c.setY(0.0)
+                self.center_y = h / 2
+
+            if c.y()+h < chk.height():
+                c.setY(chk.height()-h)
+                self.center_y = chk.height() - h / 2
+
+            if c.x() > 0:
+                c.setX(0.0)
+                self.center_x = w / 2
+
+            if c.x()+w < chk.width():
+                c.setX(chk.width()-w)
+                self.center_x = chk.width() - w / 2
 
         self.setPos(c)
 
@@ -286,12 +315,14 @@ class SvgLand(QGraphicsView):
         else:
             matrix = [1, 0, 0, -1, translate[0], translate[1]]
 
-        attributes_copy = ['width', 'height', 'x', 'y']  #, 'x', 'y']
+        attributes_copy = ['width', 'height', 'x', 'y']
 
         apos = {'matrix': matrix}
 
         for n in attributes_copy:
-            apos[n] = float(xml_node.get(n))
+            i = xml_node.get(n)
+            if i is not None:
+                apos[n] = float(i)
 
         x_offset = (apos["x"] * matrix[0])
         y_offset = (apos["y"] * matrix[0])
@@ -422,6 +453,24 @@ class SvgLand(QGraphicsView):
             print(self.index, index_item, index_item.elementId())
             self.svg_move_to_index(index_item)
 
+    def util_paint_timer(self):
+        delta = self.paint_time_delta
+        fms = (1 / delta)
+        n = tuple(self.fps_average)
+        a = (fms + sum(n)) / 10
+
+        if n[-1] != fms:
+            n = n + (fms,)
+
+        if len(n) > 10:
+            n = n[1:]
+
+        self.fps_average = n
+        seconds = int(time() % 60)
+
+        self.string_paint_fps = '%02i | %d paints/sec' % (seconds, a)
+        #self.parent.set_status()
+
     def wheelEvent(self, evt):
         if not self.anchor_translating:
             self.anchor_layer.zoom(evt)
@@ -507,24 +556,6 @@ class SvgLand(QGraphicsView):
         self.dims_viewport_raw = self.viewport().rect()
         self.dims_viewport = self.mapToScene(self.dims_viewport_raw).boundingRect()
         self.dims_center = QPointF(self.dims_viewport_raw.width() / 2, self.dims_viewport_raw.height() / 2)
-
-    def util_paint_timer(self):
-        delta = self.paint_time_delta
-        fms = (1 / delta)
-        n = tuple(self.fps_average)
-        a = (fms + sum(n)) / 10
-
-        if n[-1] != fms:
-            n = n + (fms,)
-
-        if len(n) > 10:
-            n = n[1:]
-
-        self.fps_average = n
-        seconds = int(time() % 60)
-
-        self.string_paint_fps = '%02i | %d paints/sec' % (seconds, a)
-        #self.parent.set_status()
 
     def paintEvent(self, evt):
         self.util_paint_timer()
